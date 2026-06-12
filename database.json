@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "name": "Gorilla",
+    "stock": 5
+  },
+  {
+    "id": 2,
+    "name": "Adrenaline Rush",
+    "stock": 122
+  },
+  {
+    "id": 3,
+    "name": "Tornado",
+    "stock": 10
+  },
+  {
+    "id": 4,
+    "name": "Monster",
+    "stock": 15
+  }
+]
