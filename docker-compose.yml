@@ -1,0 +1,41 @@
+# docker-compose поднимает два сервиса: базу Postgres и наше Node-приложение.
+services:
+  # Сервис базы данных
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+      POSTGRES_DB: ${PGDATABASE}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Данные БД сохраняются на диске, чтобы не терялись при перезапуске контейнера
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Приложение стартует только когда база реально готова принимать запросы
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER} -d ${PGDATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Сервис нашего API
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT}:${PORT}"
+    environment:
+      PORT: ${PORT}
+      PGHOST: db          # имя сервиса БД внутри docker-сети
+      PGPORT: 5432
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

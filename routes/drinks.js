@@ -1,80 +1,98 @@
 const express = require('express');
 const router = express.Router(); // Создаем изолированный роутер
-const fs = require('fs'); // Нам всё еще нужен модуль fs для работы с файлом
+const { pool } = require('../db'); // Пул подключений к Postgres
 
-// Перенеси сюда чтение файла
-let drinks = JSON.parse(fs.readFileSync('database.json', 'utf8'));
-
-// 1. Переносим маршрут получения всех напитков
-// ВАЖНО: Вместо app.get пишем router.get
-// И обрати внимание, что путь стал просто '/', потому что префикс '/api/drinks' мы настроим в главном файле
-router.get('/', (req, res) => {
-  res.json(drinks);
+// Получить все напитки
+router.get('/', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM drinks ORDER BY id');
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/:id', (req, res) => {
- const drinkId = Number(req.params.id)
- const foundDrink = drinks.find(drink => drink.id === drinkId);       
+// Получить один напиток по id
+router.get('/:id', async (req, res, next) => {
+  try {
+    const drinkId = Number(req.params.id);
+    // $1 — параметр запроса. Драйвер сам подставит значение безопасно,
+    // что защищает от SQL-инъекций (нельзя «дописать» вредоносный SQL).
+    const { rows } = await pool.query('SELECT * FROM drinks WHERE id = $1', [drinkId]);
 
- if (foundDrink) {
-    res.json(foundDrink);
- } 
- else{
-    res.status(404).json({error: "Напиток не найден"});
-    };
- });
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      res.status(404).json({ error: "Напиток не найден" });
+    }
+  } catch (err) {
+    next(err);
+  }
+});
 
-router.post('/', (req, res) =>{
-
+// Создать напиток
+router.post('/', async (req, res, next) => {
   const { name, stock } = req.body;
 
-    // Если имени нет, или оно пустое, или stock вообще не число
-    if (!name || typeof stock !== 'number' || stock < 0) {
-        // Сразу прерываем работу и отдаем ошибку 400 (Bad Request - плохой запрос)
-        return res.status(400).json({ error: "Некорректные данные. Укажите name (строка) и stock (положительное число)" });
-    }
-    const newId = drinks.length + 1;
-    const newDrink = {
-        id: newId,
-        name: req.body.name,
-        stock: req.body.stock
-    };
-    drinks.push(newDrink) 
-    fs.writeFileSync('database.json', JSON.stringify(drinks, null, 2));
-    res.json(newDrink)
+  // Если имени нет, или оно пустое, или stock вообще не число
+  if (!name || typeof stock !== 'number' || stock < 0) {
+    return res.status(400).json({ error: "Некорректные данные. Укажите name (строка) и stock (положительное число)" });
+  }
+
+  try {
+    // RETURNING * возвращает только что вставленную строку (с присвоенным id)
+    const { rows } = await pool.query(
+      'INSERT INTO drinks (name, stock) VALUES ($1, $2) RETURNING *',
+      [name, stock]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.delete('/:id', (req, res) =>{
+// Удалить напиток
+router.delete('/:id', async (req, res, next) => {
+  try {
     const drinkId = Number(req.params.id);
-    const index = drinks.findIndex(drink => drink.id === drinkId)
-    if (index != -1){
-        drinks.splice(index, 1);
-        fs.writeFileSync('database.json', JSON.stringify(drinks, null, 2));
-    res.status(202).json({succes:"Удаление успешно"})
-    }else{
-        res.status(404).json({error: "Напиток не найден"});
+    const result = await pool.query('DELETE FROM drinks WHERE id = $1', [drinkId]);
+
+    // rowCount — сколько строк затронул запрос. 0 значит такого id не было.
+    if (result.rowCount > 0) {
+      res.status(202).json({ success: "Удаление успешно" });
+    } else {
+      res.status(404).json({ error: "Напиток не найден" });
     }
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.put('/:id', (req, res) =>{
+// Обновить напиток
+router.put('/:id', async (req, res, next) => {
+  const { name, stock } = req.body;
 
-      const { name, stock } = req.body;
+  // Если имени нет, или оно пустое, или stock вообще не число
+  if (!name || typeof stock !== 'number' || stock < 0) {
+    return res.status(400).json({ error: "Некорректные данные. Укажите name (строка) и stock (положительное число)" });
+  }
 
-    // Если имени нет, или оно пустое, или stock вообще не число
-    if (!name || typeof stock !== 'number' || stock < 0) {
-        // Сразу прерываем работу и отдаем ошибку 400 (Bad Request - плохой запрос)
-        return res.status(400).json({ error: "Некорректные данные. Укажите name (строка) и stock (положительное число)" });
-    }
+  try {
     const drinkId = Number(req.params.id);
-    const index = drinks.findIndex(drink => drink.id === drinkId);
-    if (index != -1){
-        drinks[index].stock = req.body.stock;
-        fs.writeFileSync('database.json', JSON.stringify(drinks, null, 2));
-        res.json(drinks[index])
-    }else{
-        res.status(404).json({error: "Напиток не найден"});
+    const { rows } = await pool.query(
+      'UPDATE drinks SET name = $1, stock = $2 WHERE id = $3 RETURNING *',
+      [name, stock, drinkId]
+    );
+
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      res.status(404).json({ error: "Напиток не найден" });
     }
-})
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Экспортируем роутер, чтобы главный файл мог его увидеть
 module.exports = router;
